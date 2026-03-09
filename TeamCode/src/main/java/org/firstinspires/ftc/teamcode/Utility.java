@@ -1,5 +1,10 @@
 package org.firstinspires.ftc.teamcode;
 
+import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorEx;
+
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+
 public final class Utility {
     private Utility() {
         throw new UnsupportedOperationException(
@@ -69,5 +74,16 @@ public final class Utility {
         } else {
             return value;
         }
+    }
+
+
+    /**
+     * Retrieves the velocity of a DcMotorEx motor as rpm, the primary measurement
+     * seen in the real world.
+     * @param motor a DcMotorEx instance
+     * @return the velocity of the motor in RPM
+     */
+    public static double getMotorVelocityRPM(DcMotorEx motor) {
+        return (Math.abs(motor.getVelocity(AngleUnit.RADIANS)) / (2.0 * Math.PI)) * 60.0;
     }
 }
