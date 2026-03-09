@@ -12,6 +12,7 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
+import com.qualcomm.robotcore.hardware.ServoImplEx;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
 import java.util.List;
@@ -39,9 +40,29 @@ public class FlywheelShooter implements Subsystem {
         }
     }
 
+    public enum LedColor {
+        OFF(0.0),
+        GREEN(0.5),
+        RED(0.29),
+        YELLOW(0.388),
+        BLUE(0.65),
+        WHITE(1.0);
+
+        private final double value;
+
+        LedColor(double value) {
+            this.value = value;
+        }
+
+        public double getValue() {
+            return value;
+        }
+    }
+
     private final LinearOpMode opMode;
     public DcMotorEx leftMotor;
     public DcMotorEx rightMotor;
+    public ServoImplEx light;
 
     private State state = State.STOPPED;
     private boolean readyToShoot = false;
@@ -51,6 +72,7 @@ public class FlywheelShooter implements Subsystem {
 
     private double commandedPower = 0.0;
     private int currentRPM = 0;
+    private double commandedLedColor = 0.0;
 
     private int settlingTolerance = 75;
     private int settlingDerivativeTolerance = 50;
@@ -86,12 +108,18 @@ public class FlywheelShooter implements Subsystem {
         rightMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         rightMotor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
+        light = opMode.hardwareMap.get(ServoImplEx.class, "light");
+
         state = State.STOPPED;
         spinPosition = SpinPosition.CLOSE;
         readyToShoot = false;
         readyCandidate = false;
         commandedPower = 0.0;
+        commandedLedColor = 0.0;
+        leftMotor.setPower(0.0);
+        rightMotor.setPower(0.0);
         settlingTimer.reset();
+        light.setPosition(0.0);
     }
 
     @Override
@@ -101,16 +129,19 @@ public class FlywheelShooter implements Subsystem {
         switch (state) {
             case STOPPED:
                 commandedPower = 0.0;
+                commandedLedColor = LedColor.OFF.getValue();
                 break;
             // TODO - close and far
             case SPINNING:
                 updateReadyToShoot();
                 commandedPower = clamp(controller.run(), -1.0, 1.0);
+                commandedLedColor = readyToShoot ? LedColor.GREEN.getValue() : LedColor.RED.getValue();
                 break;
         }
 
         leftMotor.setPower(commandedPower);
         rightMotor.setPower(commandedPower);
+        light.setPosition(commandedLedColor);
     }
 
     private void updateReadyToShoot() {
@@ -155,9 +186,11 @@ public class FlywheelShooter implements Subsystem {
         readyToShoot = false;
         readyCandidate = false;
         commandedPower = 0.0;
+        commandedLedColor = 0.0;
         leftMotor.setPower(0.0);
         rightMotor.setPower(0.0);
         settlingTimer.reset();
+        light.setPosition(0.0);
     }
 
     @Override
