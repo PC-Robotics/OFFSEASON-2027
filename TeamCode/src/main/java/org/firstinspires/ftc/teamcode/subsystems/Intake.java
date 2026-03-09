@@ -18,21 +18,19 @@ import java.util.Locale;
 
 @Configurable
 public class Intake implements Subsystem {
-    // state machine :)
     public enum State {
         STOPPED, HOLDING, INTAKING, OUTTAKING, JAM_CLEARING
     }
 
-    // TODO - transition away from linearopmode
     private final LinearOpMode opMode;
     public DcMotorEx motor;
 
-    // using desiredState because
-    // sometimes driver switches modes during jam clear
+    // driver intent
     private State desiredState = State.STOPPED;
+    // actual subsystem state
     private State state = State.STOPPED;
 
-    private double commandedPower = 0;
+    private double commandedPower = 0.0;
 
     // powers are inverted in code
     private double holdingPower = 0.05;
@@ -41,13 +39,14 @@ public class Intake implements Subsystem {
     private double jamClearingPower = 0.7;
 
     // jamming
-    private double jamCurrentThreshold = 5; // amps
-    private double jamVelocityThreshold = 50; // rpm
-    private double jamTimeThreshold = 250; // ms
+    private double jamCurrentThreshold = 5.0; // amps
+    private double jamVelocityThreshold = 50.0; // rpm
+    private double jamTimeThreshold = 250.0; // ms
     private double jamMinPower = 0.4; // minimum motor power
 
     // jam clearing
-    private double jamClearDuration = 250; // ms
+    private double jamClearDuration = 250.0; // ms
+    private boolean autoJamClearingEnabled = true;
 
     private boolean jamCandidate = false;
     private boolean jammed = false;
@@ -62,17 +61,13 @@ public class Intake implements Subsystem {
     private double itemDistanceThreshold = 5.0; // cm
 
     // item must be seen continuously for this long
-    private double itemDetectionTime = 60.0;
+    private double itemDetectionTime = 60.0; // ms
     private final ElapsedTime itemDetectionTimer = new ElapsedTime();
 
-
-    // fast polling while intaking or already holding an item
-    private double distanceSensorFastPollInterval = 20.0;
-    private final ElapsedTime distanceSensorFastPollTimer = new ElapsedTime();
-
-    // slow polling otherwise
-    private double distanceSensorSlowPollInterval = 200.0;
-    private final ElapsedTime distanceSensorSlowPollTimer = new ElapsedTime();
+    // single polling timer
+    private double distanceSensorFastPollInterval = 20.0;  // ms
+    private double distanceSensorSlowPollInterval = 200.0; // ms
+    private final ElapsedTime distanceSensorPollTimer = new ElapsedTime();
 
     public Intake(LinearOpMode opMode) {
         this.opMode = opMode;
@@ -87,10 +82,11 @@ public class Intake implements Subsystem {
 
         distanceSensor = opMode.hardwareMap.get(DistanceSensor.class, "intakeSensor");
 
-        // idiot (me) proof
         desiredState = State.STOPPED;
         state = State.STOPPED;
         commandedPower = 0.0;
+
+        autoJamClearingEnabled = true;
 
         jamCandidate = false;
         jammed = false;
@@ -101,8 +97,7 @@ public class Intake implements Subsystem {
         itemCandidate = false;
         itemDetectionTimer.reset();
 
-        distanceSensorFastPollTimer.reset();
-        distanceSensorSlowPollTimer.reset();
+        distanceSensorPollTimer.reset();
     }
 
     @Override
@@ -110,7 +105,6 @@ public class Intake implements Subsystem {
         detectJam();
         detectItem();
 
-        // dunno if this is the right way to do it
         if (state == State.JAM_CLEARING) {
             if (jamClearTimer.milliseconds() >= jamClearDuration) {
                 state = desiredState;
@@ -118,11 +112,8 @@ public class Intake implements Subsystem {
         } else {
             state = desiredState;
 
-            if (desiredState == State.INTAKING && jammed) {
-                state = State.JAM_CLEARING;
-                jamClearTimer.reset();
-                jamCandidate = false;
-                jammed = false;
+            if (autoJamClearingEnabled && state == State.INTAKING && jammed) {
+                enterJamClearing();
             }
         }
 
@@ -147,15 +138,22 @@ public class Intake implements Subsystem {
         motor.setPower(commandedPower);
     }
 
+    private void enterJamClearing() {
+        state = State.JAM_CLEARING;
+        jamClearTimer.reset();
+        jamCandidate = false;
+        jammed = false;
+    }
+
     private void detectJam() {
         boolean sus =
                 desiredState == State.INTAKING
-                && Math.abs(commandedPower) >= jamMinPower
+                && Math.abs(motor.getPower()) >= jamMinPower
                 && motor.getCurrent(CurrentUnit.AMPS) >= jamCurrentThreshold
                 && getMotorVelocityRPM(motor) <= jamVelocityThreshold;
 
         if (sus) {
-            if (!jamCandidate) { // rising edge to avoid resetting timer over and over again
+            if (!jamCandidate) {
                 jamCandidate = true;
                 jamTimer.reset();
             }
@@ -168,27 +166,14 @@ public class Intake implements Subsystem {
     }
 
     private void detectItem() {
-        boolean highPriorityDetection =
-                desiredState == State.INTAKING || hasItem;
+        double pollInterval = (desiredState == State.INTAKING || hasItem)
+                              ? distanceSensorFastPollInterval
+                              : distanceSensorSlowPollInterval;
 
-        boolean shouldReadSensor;
-        if (highPriorityDetection) {
-            shouldReadSensor = distanceSensorFastPollTimer.milliseconds() >= distanceSensorFastPollInterval;
-            if (shouldReadSensor) {
-                distanceSensorFastPollTimer.reset();
-            }
-            distanceSensorSlowPollTimer.reset();
-        } else {
-            shouldReadSensor = distanceSensorSlowPollTimer.milliseconds() >= distanceSensorSlowPollInterval;
-            if (shouldReadSensor) {
-                distanceSensorSlowPollTimer.reset();
-            }
-            distanceSensorFastPollTimer.reset();
-        }
-
-        if (!shouldReadSensor) {
+        if (distanceSensorPollTimer.milliseconds() < pollInterval) {
             return;
         }
+        distanceSensorPollTimer.reset();
 
         boolean sus = distanceSensor.getDistance(DistanceUnit.CM) <= itemDistanceThreshold;
 
@@ -202,7 +187,6 @@ public class Intake implements Subsystem {
         } else {
             itemCandidate = false;
             hasItem = false;
-            itemDetectionTimer.reset();
         }
     }
 
@@ -222,10 +206,18 @@ public class Intake implements Subsystem {
         desiredState = State.HOLDING;
     }
 
+    // temp jam clear
     public void startJamClearing() {
-        desiredState = State.JAM_CLEARING;
-        state = State.JAM_CLEARING;
-        jamClearTimer.reset();
+        enterJamClearing();
+    }
+
+    // Manual override: disable automatic jam clearing so driver can take control.
+    public void setAutoJamClearingEnabled(boolean enabled) {
+        this.autoJamClearingEnabled = enabled;
+    }
+
+    public boolean isAutoJamClearingEnabled() {
+        return autoJamClearingEnabled;
     }
 
     public void setHoldingPower(double power) {
@@ -240,36 +232,14 @@ public class Intake implements Subsystem {
         this.outtakingPower = Math.abs(clamp(power, -1.0, 1.0));
     }
 
-    public void setJamClearingPower(double power) {
-        this.jamClearingPower = Math.abs(clamp(power, -1.0, 1.0));
-    }
-
-    public void setJamClearDuration(double jamClearDuration) {
-        this.jamClearDuration = Math.max(0.0, jamClearDuration);
-    }
-
-    public void setItemDistanceThreshold(double itemDistanceThreshold) {
-        this.itemDistanceThreshold = Math.max(0.0, itemDistanceThreshold);
-    }
-
-    public void setItemDetectionTime(double itemDetectionTime) {
-        this.itemDetectionTime = Math.max(0.0, itemDetectionTime);
-    }
-
-    public void setDistanceSensorFastPollInterval(double distanceSensorFastPollInterval) {
-        this.distanceSensorFastPollInterval = Math.max(1.0, distanceSensorFastPollInterval);
-    }
-
-    public void setDistanceSensorSlowPollInterval(double distanceSensorSlowPollInterval) {
-        this.distanceSensorSlowPollInterval = Math.max(1.0, distanceSensorSlowPollInterval);
-    }
-
     @Override
     public void stop() {
         desiredState = State.STOPPED;
         state = State.STOPPED;
         commandedPower = 0.0;
         motor.setPower(0.0);
+
+        autoJamClearingEnabled = true;
 
         jamCandidate = false;
         jammed = false;
@@ -279,8 +249,8 @@ public class Intake implements Subsystem {
         hasItem = false;
         itemCandidate = false;
         itemDetectionTimer.reset();
-        distanceSensorFastPollTimer.reset();
-        distanceSensorSlowPollTimer.reset();
+
+        distanceSensorPollTimer.reset();
     }
 
     @Override
@@ -290,6 +260,7 @@ public class Intake implements Subsystem {
                 "Desired State: " + desiredState,
                 "Has Item: " + hasItem,
                 "Jammed: " + jammed,
+                "Auto Jam Clear: " + autoJamClearingEnabled,
                 "Power: " + String.format(Locale.US, "%.2f", commandedPower)
         );
     }
@@ -303,6 +274,7 @@ public class Intake implements Subsystem {
                 "Motor Power: " + String.format(Locale.US, "%.2f", motor.getPower()),
                 "Motor Current (A): " + String.format(Locale.US, "%.2f", motor.getCurrent(CurrentUnit.AMPS)),
                 "Motor Velocity (RPM): " + String.format(Locale.US, "%.2f", getMotorVelocityRPM(motor)),
+                "Auto Jam Clearing Enabled: " + autoJamClearingEnabled,
                 "Has Item: " + hasItem,
                 "Item Candidate: " + itemCandidate,
                 "Last Item Distance (cm): " + String.format(Locale.US, "%.2f", distanceSensor.getDistance(DistanceUnit.CM)),
@@ -311,6 +283,7 @@ public class Intake implements Subsystem {
                 "Item Fast Poll Interval (ms): " + String.format(Locale.US, "%.1f", distanceSensorFastPollInterval),
                 "Item Slow Poll Interval (ms): " + String.format(Locale.US, "%.1f", distanceSensorSlowPollInterval),
                 "Item Detect Timer (ms): " + String.format(Locale.US, "%.1f", itemDetectionTimer.milliseconds()),
+                "Item Poll Timer (ms): " + String.format(Locale.US, "%.1f", distanceSensorPollTimer.milliseconds()),
                 "Jam Candidate: " + jamCandidate,
                 "Jammed: " + jammed,
                 "Jam Timer (ms): " + String.format(Locale.US, "%.1f", jamTimer.milliseconds()),
