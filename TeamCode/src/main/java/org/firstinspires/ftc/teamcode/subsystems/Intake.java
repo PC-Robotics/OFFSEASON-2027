@@ -7,9 +7,11 @@ import com.bylazar.configurables.annotations.Configurable;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.DistanceSensor;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.robotcore.external.navigation.CurrentUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 
 import java.util.List;
 import java.util.Locale;
@@ -53,6 +55,18 @@ public class Intake implements Subsystem {
     private final ElapsedTime jamTimer = new ElapsedTime();
     private final ElapsedTime jamClearTimer = new ElapsedTime();
 
+    // item detection
+    private DistanceSensor distanceSensor;
+    private boolean hasItem = false;
+    private boolean itemCandidate = false;
+    private double itemDistanceThreshold = 5.0; // cm
+    private int itemDetectionLoops = 3;
+
+    private int itemDetectedLoops = 0;
+
+    private final ElapsedTime itemDetectionTimer = new ElapsedTime();
+
+
     public Intake(LinearOpMode opMode) {
         this.opMode = opMode;
     }
@@ -64,6 +78,9 @@ public class Intake implements Subsystem {
         motor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         motor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
 
+        distanceSensor = opMode.hardwareMap.get(DistanceSensor.class, "intakeSensor");
+
+
         // idiot (me) proof
         desiredState = State.STOPPED;
         state = State.STOPPED;
@@ -72,12 +89,17 @@ public class Intake implements Subsystem {
         jammed = false;
         jamTimer.reset();
         jamClearTimer.reset();
+
+        hasItem = false;
+        itemCandidate = false;
+        itemDetectionTimer.reset();
     }
 
 
     @Override
     public void update() {
         detectJam();
+        detectItem();
 
         // dunno if this is the right way to do it
         if (state == State.JAM_CLEARING) {
@@ -134,6 +156,23 @@ public class Intake implements Subsystem {
             jamCandidate = false;
             jammed = false;
         }
+    }
+
+    private void detectItem() {
+        boolean sus = distanceSensor.getDistance(DistanceUnit.CM) <= itemDistanceThreshold;
+
+        if (sus) {
+            if (!itemCandidate) {
+                itemCandidate = true;
+                itemDetectedLoops = 0;
+            }
+
+            hasItem = ++itemDetectedLoops >= itemDetectionLoops;
+        } else {
+            itemCandidate = false;
+            hasItem = false;
+        }
+
     }
 
     public void startIntake() {
@@ -197,6 +236,7 @@ public class Intake implements Subsystem {
         return List.of(
                 "Intake State: " + state,
                 "Desired State: " + desiredState,
+                "Has Item: " + hasItem,
                 "Jammed: " + jammed,
                 "Power: " + String.format(Locale.US, "%.2f", commandedPower)
         );
@@ -211,6 +251,11 @@ public class Intake implements Subsystem {
                 "Motor Power: " + String.format(Locale.US, "%.2f", motor.getPower()),
                 "Motor Current (A): " + String.format(Locale.US, "%.2f", motor.getCurrent(CurrentUnit.AMPS)),
                 "Motor Velocity (RPM): " + String.format(Locale.US, "%.2f", getMotorVelocityRPM(motor)),
+                "Has Item: " + hasItem,
+                "Item Candidate: " + itemCandidate,
+                "Item Distance (cm): " + String.format(Locale.US, "%.2f", distanceSensor.getDistance(DistanceUnit.CM)),
+                "Item Detect Distance (cm): " + String.format(Locale.US, "%.2f", itemDistanceThreshold),
+                "Loops Detected: " + itemDetectedLoops,
                 "Jam Candidate: " + jamCandidate,
                 "Jammed: " + jammed,
                 "Jam Timer (ms): " + String.format(Locale.US, "%.1f", jamTimer.milliseconds()),
@@ -240,5 +285,13 @@ public class Intake implements Subsystem {
 
     public boolean isJammed() {
         return jammed;
+    }
+
+    public boolean hasItem() {
+        return hasItem;
+    }
+
+    public double getItemDistanceCm() {
+        return distanceSensor.getDistance(DistanceUnit.CM);
     }
 }
