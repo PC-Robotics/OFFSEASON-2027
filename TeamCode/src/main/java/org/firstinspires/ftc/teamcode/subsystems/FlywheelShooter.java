@@ -3,6 +3,8 @@ package org.firstinspires.ftc.teamcode.subsystems;
 import static org.firstinspires.ftc.teamcode.Utility.clamp;
 import static org.firstinspires.ftc.teamcode.Utility.getMotorVelocityRPM;
 
+import androidx.annotation.NonNull;
+
 import com.bylazar.configurables.annotations.Configurable;
 import com.pedropathing.control.PIDFCoefficients;
 import com.pedropathing.control.PIDFController;
@@ -22,6 +24,21 @@ public class FlywheelShooter implements Subsystem {
         SPINNING
     }
 
+    public enum SpinPosition {
+        CLOSE(3000),
+        FAR(5500);
+
+        private int rpm;
+
+        SpinPosition(int rpm) {
+            this.rpm = rpm;
+        }
+
+        public int getRpm() {
+            return rpm;
+        }
+    }
+
     private final LinearOpMode opMode;
     public DcMotorEx leftMotor;
     public DcMotorEx rightMotor;
@@ -30,12 +47,10 @@ public class FlywheelShooter implements Subsystem {
     private boolean readyToShoot = false;
     private boolean readyCandidate = false;
 
+    private SpinPosition spinPosition = SpinPosition.CLOSE;
+
     private double commandedPower = 0.0;
     private int currentRPM = 0;
-
-    //
-    private int closeSpinningRPM = 3000;
-    private int farSpinningRPM = 5500;
 
     private int settlingTolerance = 75;
     private int settlingDerivativeTolerance = 50;
@@ -72,6 +87,7 @@ public class FlywheelShooter implements Subsystem {
         rightMotor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
 
         state = State.STOPPED;
+        spinPosition = SpinPosition.CLOSE;
         readyToShoot = false;
         readyCandidate = false;
         commandedPower = 0.0;
@@ -86,7 +102,7 @@ public class FlywheelShooter implements Subsystem {
             case STOPPED:
                 commandedPower = 0.0;
                 break;
-                // TODO - close and far
+            // TODO - close and far
             case SPINNING:
                 updateReadyToShoot();
                 commandedPower = clamp(controller.run(), -1.0, 1.0);
@@ -135,6 +151,7 @@ public class FlywheelShooter implements Subsystem {
     @Override
     public void stop() {
         state = State.STOPPED;
+        spinPosition = SpinPosition.CLOSE;
         readyToShoot = false;
         readyCandidate = false;
         commandedPower = 0.0;
@@ -169,12 +186,29 @@ public class FlywheelShooter implements Subsystem {
         return readyToShoot;
     }
 
+    public SpinPosition getSpinPosition() {
+        return spinPosition;
+    }
+
+    public void setSpinPosition(@NonNull SpinPosition spinPosition) {
+        this.spinPosition = spinPosition;
+        controller.setTargetPosition(spinPosition.getRpm());
+    }
+
+    public State getState() {
+        return state;
+    }
+
+    public void setState(State state) {
+        this.state = state;
+    }
+
     public void setCloseSpinningRPM(int closeSpinningRPM) {
-        this.closeSpinningRPM = clamp(closeSpinningRPM, 0, 6000);
+        SpinPosition.CLOSE.rpm = clamp(closeSpinningRPM, 0, 6000);
     }
 
     public void setFarSpinningRPM(int farSpinningRPM) {
-        this.farSpinningRPM = clamp(farSpinningRPM, 0, 6000);
+        SpinPosition.FAR.rpm = clamp(farSpinningRPM, 0, 6000);
     }
 
     public void setSettlingTolerance(int settlingTolerance) {
