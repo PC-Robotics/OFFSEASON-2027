@@ -215,27 +215,6 @@ public class Intake implements Subsystem {
         enterJamClearing();
     }
 
-    // Manual override: disable automatic jam clearing so driver can take control.
-    public void setAutoJamClearingEnabled(boolean enabled) {
-        this.autoJamClearingEnabled = enabled;
-    }
-
-    public boolean isAutoJamClearingEnabled() {
-        return autoJamClearingEnabled;
-    }
-
-    public void setHoldingPower(double power) {
-        this.holdingPower = Math.abs(clamp(power, -1.0, 1.0));
-    }
-
-    public void setIntakingPower(double power) {
-        this.intakingPower = Math.abs(clamp(power, -1.0, 1.0));
-    }
-
-    public void setOuttakingPower(double power) {
-        this.outtakingPower = Math.abs(clamp(power, -1.0, 1.0));
-    }
-
     @Override
     public void stop() {
         desiredState = State.STOPPED;
@@ -296,6 +275,27 @@ public class Intake implements Subsystem {
                 "Jam Velocity Threshold (RPM): " + String.format(Locale.US, "%.2f", jamVelocityThreshold),
                 "Jam Time Threshold (ms): " + String.format(Locale.US, "%.1f", jamTimeThreshold)
         );
+    }
+
+    // Manual override: disable automatic jam clearing so driver can take control.
+    public void setAutoJamClearingEnabled(boolean enabled) {
+        this.autoJamClearingEnabled = enabled;
+    }
+
+    public boolean isAutoJamClearingEnabled() {
+        return autoJamClearingEnabled;
+    }
+
+    public void setHoldingPower(double power) {
+        this.holdingPower = Math.abs(clamp(power, -1.0, 1.0));
+    }
+
+    public void setIntakingPower(double power) {
+        this.intakingPower = Math.abs(clamp(power, -1.0, 1.0));
+    }
+
+    public void setOuttakingPower(double power) {
+        this.outtakingPower = Math.abs(clamp(power, -1.0, 1.0));
     }
 
     public State getState() {
