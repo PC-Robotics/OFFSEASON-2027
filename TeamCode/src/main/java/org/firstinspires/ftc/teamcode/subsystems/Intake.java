@@ -151,7 +151,7 @@ public class Intake implements Subsystem {
 
     private void detectJam() {
         boolean sus =
-                desiredState == State.INTAKING
+                state == State.INTAKING
                 && Math.abs(motor.getPower()) >= jamMinPower
                 && motor.getCurrent(CurrentUnit.AMPS) >= jamCurrentThreshold
                 && getMotorVelocityRPM(motor) <= jamVelocityThreshold;
