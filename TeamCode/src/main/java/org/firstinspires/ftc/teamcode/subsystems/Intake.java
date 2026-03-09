@@ -19,7 +19,11 @@ import java.util.Locale;
 @Configurable
 public class Intake implements Subsystem {
     public enum State {
-        STOPPED, HOLDING, INTAKING, OUTTAKING, JAM_CLEARING
+        STOPPED,
+        HOLDING,
+        INTAKING,
+        OUTTAKING,
+        JAM_CLEARING
     }
 
     private final LinearOpMode opMode;
