@@ -60,12 +60,19 @@ public class Intake implements Subsystem {
     private boolean hasItem = false;
     private boolean itemCandidate = false;
     private double itemDistanceThreshold = 5.0; // cm
-    private int itemDetectionLoops = 3;
 
-    private int itemDetectedLoops = 0;
-
+    // item must be seen continuously for this long
+    private double itemDetectionTime = 60.0;
     private final ElapsedTime itemDetectionTimer = new ElapsedTime();
 
+
+    // fast polling while intaking or already holding an item
+    private double distanceSensorFastPollInterval = 20.0;
+    private final ElapsedTime distanceSensorFastPollTimer = new ElapsedTime();
+
+    // slow polling otherwise
+    private double distanceSensorSlowPollInterval = 200.0;
+    private final ElapsedTime distanceSensorSlowPollTimer = new ElapsedTime();
 
     public Intake(LinearOpMode opMode) {
         this.opMode = opMode;
@@ -80,11 +87,11 @@ public class Intake implements Subsystem {
 
         distanceSensor = opMode.hardwareMap.get(DistanceSensor.class, "intakeSensor");
 
-
         // idiot (me) proof
         desiredState = State.STOPPED;
         state = State.STOPPED;
         commandedPower = 0.0;
+
         jamCandidate = false;
         jammed = false;
         jamTimer.reset();
@@ -93,8 +100,10 @@ public class Intake implements Subsystem {
         hasItem = false;
         itemCandidate = false;
         itemDetectionTimer.reset();
-    }
 
+        distanceSensorFastPollTimer.reset();
+        distanceSensorSlowPollTimer.reset();
+    }
 
     @Override
     public void update() {
@@ -159,20 +168,42 @@ public class Intake implements Subsystem {
     }
 
     private void detectItem() {
+        boolean highPriorityDetection =
+                desiredState == State.INTAKING || hasItem;
+
+        boolean shouldReadSensor;
+        if (highPriorityDetection) {
+            shouldReadSensor = distanceSensorFastPollTimer.milliseconds() >= distanceSensorFastPollInterval;
+            if (shouldReadSensor) {
+                distanceSensorFastPollTimer.reset();
+            }
+            distanceSensorSlowPollTimer.reset();
+        } else {
+            shouldReadSensor = distanceSensorSlowPollTimer.milliseconds() >= distanceSensorSlowPollInterval;
+            if (shouldReadSensor) {
+                distanceSensorSlowPollTimer.reset();
+            }
+            distanceSensorFastPollTimer.reset();
+        }
+
+        if (!shouldReadSensor) {
+            return;
+        }
+
         boolean sus = distanceSensor.getDistance(DistanceUnit.CM) <= itemDistanceThreshold;
 
         if (sus) {
             if (!itemCandidate) {
                 itemCandidate = true;
-                itemDetectedLoops = 0;
+                itemDetectionTimer.reset();
             }
 
-            hasItem = ++itemDetectedLoops >= itemDetectionLoops;
+            hasItem = itemDetectionTimer.milliseconds() >= itemDetectionTime;
         } else {
             itemCandidate = false;
             hasItem = false;
+            itemDetectionTimer.reset();
         }
-
     }
 
     public void startIntake() {
@@ -217,6 +248,21 @@ public class Intake implements Subsystem {
         this.jamClearDuration = Math.max(0.0, jamClearDuration);
     }
 
+    public void setItemDistanceThreshold(double itemDistanceThreshold) {
+        this.itemDistanceThreshold = Math.max(0.0, itemDistanceThreshold);
+    }
+
+    public void setItemDetectionTime(double itemDetectionTime) {
+        this.itemDetectionTime = Math.max(0.0, itemDetectionTime);
+    }
+
+    public void setDistanceSensorFastPollInterval(double distanceSensorFastPollInterval) {
+        this.distanceSensorFastPollInterval = Math.max(1.0, distanceSensorFastPollInterval);
+    }
+
+    public void setDistanceSensorSlowPollInterval(double distanceSensorSlowPollInterval) {
+        this.distanceSensorSlowPollInterval = Math.max(1.0, distanceSensorSlowPollInterval);
+    }
 
     @Override
     public void stop() {
@@ -224,12 +270,18 @@ public class Intake implements Subsystem {
         state = State.STOPPED;
         commandedPower = 0.0;
         motor.setPower(0.0);
+
         jamCandidate = false;
         jammed = false;
         jamTimer.reset();
         jamClearTimer.reset();
-    }
 
+        hasItem = false;
+        itemCandidate = false;
+        itemDetectionTimer.reset();
+        distanceSensorFastPollTimer.reset();
+        distanceSensorSlowPollTimer.reset();
+    }
 
     @Override
     public List<String> getSimpleTelemetry() {
@@ -253,9 +305,12 @@ public class Intake implements Subsystem {
                 "Motor Velocity (RPM): " + String.format(Locale.US, "%.2f", getMotorVelocityRPM(motor)),
                 "Has Item: " + hasItem,
                 "Item Candidate: " + itemCandidate,
-                "Item Distance (cm): " + String.format(Locale.US, "%.2f", distanceSensor.getDistance(DistanceUnit.CM)),
-                "Item Detect Distance (cm): " + String.format(Locale.US, "%.2f", itemDistanceThreshold),
-                "Loops Detected: " + itemDetectedLoops,
+                "Last Item Distance (cm): " + String.format(Locale.US, "%.2f", distanceSensor.getDistance(DistanceUnit.CM)),
+                "Item Distance Threshold (cm): " + String.format(Locale.US, "%.2f", itemDistanceThreshold),
+                "Item Detection Time (ms): " + String.format(Locale.US, "%.1f", itemDetectionTime),
+                "Item Fast Poll Interval (ms): " + String.format(Locale.US, "%.1f", distanceSensorFastPollInterval),
+                "Item Slow Poll Interval (ms): " + String.format(Locale.US, "%.1f", distanceSensorSlowPollInterval),
+                "Item Detect Timer (ms): " + String.format(Locale.US, "%.1f", itemDetectionTimer.milliseconds()),
                 "Jam Candidate: " + jamCandidate,
                 "Jammed: " + jammed,
                 "Jam Timer (ms): " + String.format(Locale.US, "%.1f", jamTimer.milliseconds()),
@@ -265,7 +320,6 @@ public class Intake implements Subsystem {
                 "Jam Time Threshold (ms): " + String.format(Locale.US, "%.1f", jamTimeThreshold)
         );
     }
-
 
     public State getState() {
         return state;
@@ -291,7 +345,7 @@ public class Intake implements Subsystem {
         return hasItem;
     }
 
-    public double getItemDistanceCm() {
+    public double getItemDistance() {
         return distanceSensor.getDistance(DistanceUnit.CM);
     }
 }
