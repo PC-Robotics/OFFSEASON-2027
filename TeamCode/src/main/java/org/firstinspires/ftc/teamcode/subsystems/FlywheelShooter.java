@@ -26,18 +26,8 @@ public class FlywheelShooter implements Subsystem {
     }
 
     public enum SpinPosition {
-        CLOSE(3000),
-        FAR(5500);
-
-        private int rpm;
-
-        SpinPosition(int rpm) {
-            this.rpm = rpm;
-        }
-
-        public int getRpm() {
-            return rpm;
-        }
+        CLOSE,
+        FAR
     }
 
     public enum LedColor {
@@ -59,6 +49,13 @@ public class FlywheelShooter implements Subsystem {
         }
     }
 
+    private static final PIDFCoefficients COEFFICIENTS = new PIDFCoefficients(
+            0.0005,
+            0.0,
+            0.0,
+            1.0
+    );
+
     private final LinearOpMode opMode;
     public DcMotorEx leftMotor;
     public DcMotorEx rightMotor;
@@ -71,28 +68,23 @@ public class FlywheelShooter implements Subsystem {
     private SpinPosition spinPosition = SpinPosition.CLOSE;
 
     private double commandedPower = 0.0;
-    private int currentRPM = 0;
-    private double commandedLedColor = 0.0;
+    private double currentRPM = 0.0;
+    private LedColor commandedLedColor = LedColor.OFF;
 
-    private int settlingTolerance = 75;
-    private int settlingDerivativeTolerance = 50;
+    private int closeSpinningRPM = 3000;
+    private int farSpinningRPM = 5500;
+
+    private double settlingTolerance = 75.0;
+    private double settlingDerivativeTolerance = 50.0;
     private int settlingTimeThreshold = 300; // ms
 
     private final ElapsedTime settlingTimer = new ElapsedTime();
 
     private final PIDFController controller;
 
-    private static final PIDFCoefficients coefficients = new PIDFCoefficients(
-            0.0005,
-            0,
-            0,
-            1.0
-    );
-
-
     public FlywheelShooter(LinearOpMode opMode) {
         this.opMode = opMode;
-        controller = new PIDFController(coefficients);
+        controller = new PIDFController(COEFFICIENTS);
     }
 
     @Override
@@ -115,38 +107,51 @@ public class FlywheelShooter implements Subsystem {
         readyToShoot = false;
         readyCandidate = false;
         commandedPower = 0.0;
-        commandedLedColor = 0.0;
+        currentRPM = 0.0;
+        commandedLedColor = LedColor.OFF;
+
+        controller.reset();
+        controller.setTargetPosition(getTargetRPM());
+
         leftMotor.setPower(0.0);
         rightMotor.setPower(0.0);
         settlingTimer.reset();
-        light.setPosition(0.0);
+        light.setPosition(LedColor.OFF.getValue());
     }
 
     @Override
     public void update() {
         calculateRPM();
+        updateReadyToShoot();
 
         switch (state) {
             case STOPPED:
                 commandedPower = 0.0;
-                commandedLedColor = LedColor.OFF.getValue();
+                commandedLedColor = LedColor.OFF;
+                controller.reset();
                 break;
-            // TODO - close and far
+
             case SPINNING:
-                updateReadyToShoot();
+                if (controller.getTargetPosition() != getTargetRPM()) {
+                    controller.setTargetPosition(getTargetRPM());
+                }
+                controller.updatePosition(currentRPM);
+                controller.updateFeedForwardInput(0.5);
+
                 commandedPower = clamp(controller.run(), -1.0, 1.0);
-                commandedLedColor = readyToShoot ? LedColor.GREEN.getValue() : LedColor.RED.getValue();
+                commandedLedColor = readyToShoot ? LedColor.GREEN : LedColor.RED;
                 break;
         }
 
         leftMotor.setPower(commandedPower);
         rightMotor.setPower(commandedPower);
-        light.setPosition(commandedLedColor);
+        light.setPosition(commandedLedColor.getValue());
     }
 
     private void updateReadyToShoot() {
         boolean sus =
-                Math.abs(controller.getError()) <= settlingTolerance
+                state == State.SPINNING
+                && Math.abs(controller.getError()) <= settlingTolerance
                 && Math.abs(controller.getErrorDerivative()) <= settlingDerivativeTolerance;
 
         if (sus) {
@@ -163,12 +168,18 @@ public class FlywheelShooter implements Subsystem {
     }
 
     private void calculateRPM() {
-        currentRPM = (int) (
-                (getMotorVelocityRPM(leftMotor) +
-                 getMotorVelocityRPM(rightMotor)
-                )
-                * 0.5
-        );
+        currentRPM = (getMotorVelocityRPM(leftMotor) + getMotorVelocityRPM(rightMotor)) * 0.5;
+    }
+
+    private int getTargetRPM() {
+        switch (spinPosition) {
+            case CLOSE:
+                return closeSpinningRPM;
+            case FAR:
+                return farSpinningRPM;
+        }
+
+        return closeSpinningRPM;
     }
 
     public void startSpinning() {
@@ -186,32 +197,46 @@ public class FlywheelShooter implements Subsystem {
         readyToShoot = false;
         readyCandidate = false;
         commandedPower = 0.0;
-        commandedLedColor = 0.0;
+        currentRPM = 0.0;
+        commandedLedColor = LedColor.OFF;
+
+        controller.reset();
+
         leftMotor.setPower(0.0);
         rightMotor.setPower(0.0);
         settlingTimer.reset();
-        light.setPosition(0.0);
+        light.setPosition(LedColor.OFF.getValue());
     }
 
     @Override
     public List<String> getSimpleTelemetry() {
         return List.of(
                 "Flywheel State: " + state,
+                "Spin Position: " + spinPosition,
                 "Ready To Shoot: " + readyToShoot,
                 "Power: " + String.format(Locale.US, "%.2f", commandedPower)
         );
     }
 
-    // TODO - actually finish im just too lazy
     @Override
     public List<String> getDetailedTelemetry() {
         return List.of(
                 "Flywheel State: " + state,
+                "Spin Position: " + spinPosition,
                 "Commanded Power: " + String.format(Locale.US, "%.2f", commandedPower),
                 "Left Motor Power: " + String.format(Locale.US, "%.2f", leftMotor.getPower()),
                 "Right Motor Power: " + String.format(Locale.US, "%.2f", rightMotor.getPower()),
-                "Current RPM: " + currentRPM,
-                "Ready To Shoot: " + readyToShoot
+                "Current RPM: " + String.format(Locale.US, "%.2f", currentRPM),
+                "Target RPM: " + getTargetRPM(),
+                "PID Error: " + String.format(Locale.US, "%.2f", controller.getError()),
+                "PID Error Derivative: " + String.format(Locale.US, "%.2f", controller.getErrorDerivative()),
+                "Ready Candidate: " + readyCandidate,
+                "Ready To Shoot: " + readyToShoot,
+                "Settling Timer (ms): " + String.format(Locale.US, "%.1f", settlingTimer.milliseconds()),
+                "Settling Tolerance: " + String.format(Locale.US, "%.2f", settlingTolerance),
+                "Settling Derivative Tolerance: " + String.format(Locale.US, "%.2f", settlingDerivativeTolerance),
+                "Settling Time Threshold (ms): " + String.format(Locale.US, "%.1f", settlingTimeThreshold),
+                "LED Color: " + commandedLedColor
         );
     }
 
@@ -225,34 +250,41 @@ public class FlywheelShooter implements Subsystem {
 
     public void setSpinPosition(@NonNull SpinPosition spinPosition) {
         this.spinPosition = spinPosition;
-        controller.setTargetPosition(spinPosition.getRpm());
+        controller.setTargetPosition(getTargetRPM());
+        readyToShoot = false;
+        readyCandidate = false;
+        settlingTimer.reset();
     }
 
     public State getState() {
         return state;
     }
 
-    public void setState(State state) {
-        this.state = state;
-    }
-
     public void setCloseSpinningRPM(int closeSpinningRPM) {
-        SpinPosition.CLOSE.rpm = clamp(closeSpinningRPM, 0, 6000);
+        this.closeSpinningRPM = clamp(closeSpinningRPM, 0, 6000);
     }
 
     public void setFarSpinningRPM(int farSpinningRPM) {
-        SpinPosition.FAR.rpm = clamp(farSpinningRPM, 0, 6000);
+        this.farSpinningRPM = clamp(farSpinningRPM, 0, 6000);
     }
 
-    public void setSettlingTolerance(int settlingTolerance) {
-        this.settlingTolerance = settlingTolerance;
+    public void setSettlingTolerance(double settlingTolerance) {
+        this.settlingTolerance = Math.max(0.0, settlingTolerance);
     }
 
-    public void setSettlingDerivativeTolerance(int settlingDerivativeTolerance) {
-        this.settlingDerivativeTolerance = settlingDerivativeTolerance;
+    public void setSettlingDerivativeTolerance(double settlingDerivativeTolerance) {
+        this.settlingDerivativeTolerance = Math.max(0.0, settlingDerivativeTolerance);
     }
 
     public void setSettlingTimeThreshold(int settlingTimeThreshold) {
-        this.settlingTimeThreshold = settlingTimeThreshold;
+        this.settlingTimeThreshold = Math.max(0, settlingTimeThreshold);
+    }
+
+    public double getCurrentRPM() {
+        return currentRPM;
+    }
+
+    public double getCommandedPower() {
+        return commandedPower;
     }
 }
