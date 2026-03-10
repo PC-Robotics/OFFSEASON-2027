@@ -1,0 +1,83 @@
+package org.firstinspires.ftc.teamcode.subsystems.shooting;
+
+import static org.firstinspires.ftc.teamcode.Utility.lerp;
+import static org.firstinspires.ftc.teamcode.Utility.polarTo;
+
+import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
+
+import java.util.Map;
+import java.util.TreeMap;
+
+public class ShotCalculatorDistance implements ShotCalculator {
+    private final TreeMap<Double, Double> distanceToRPM = new TreeMap<>();
+
+    private final double minDistance = 0;
+    private final double maxDistance = 100;
+
+    private Pose2D robotPose;
+    private Pose2D goalPose;
+
+    public ShotCalculatorDistance() {}
+
+    @Override
+    public void reset() {
+        robotPose = null;
+        goalPose = null;
+    }
+
+    @Override
+    public void updateRobotPose(Pose2D robotPose) {
+        this.robotPose = robotPose;
+    }
+
+    @Override
+    public void updateGoalPose(Pose2D goalPose) {
+        this.goalPose = goalPose;
+    }
+
+    @Override
+    public ShotSolution run() {
+        if (robotPose == null || goalPose == null || distanceToRPM.isEmpty()) {
+            return new ShotSolution(0.0, 0.0, 0.0, false);
+        }
+
+        double[] polar = polarTo(robotPose, goalPose);
+        double distance = polar[0];
+        double heading = polar[1];
+
+        if (distance < minDistance || distance > maxDistance) {
+            return new ShotSolution(distance, 0.0, heading, false);
+        }
+
+        double rpm = lookupRPM(distance);
+
+        return new ShotSolution(distance, rpm, heading, true);
+    }
+
+    private double lookupRPM(double distance) {
+        Map.Entry<Double, Double> lower = distanceToRPM.floorEntry(distance);
+        Map.Entry<Double, Double> upper = distanceToRPM.ceilingEntry(distance);
+
+        if (lower == null) {
+            return distanceToRPM.firstEntry().getValue();
+        }
+        if (upper == null) {
+            return distanceToRPM.lastEntry().getValue();
+        }
+        if (lower.getKey().equals(upper.getKey())) {
+            return lower.getValue();
+        }
+
+        double t = (distance - lower.getKey()) / (upper.getKey() - lower.getKey());
+        return lerp(lower.getValue(), upper.getValue(), t);
+    }
+
+    // testing
+    public void addShotPoint(double distance, double rpm) {
+        distanceToRPM.put(distance, rpm);
+    }
+
+    public void clearShotPoints() {
+        distanceToRPM.clear();
+    }
+}
